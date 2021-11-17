@@ -3,7 +3,13 @@
  *
  */
 class UserRepository {
-  function create($name, $password_hashed, $email) {
+  public static function getUserCount() {
+    $pdo = ctx_getpdo();
+    $result = $pdo->query('SELECT COUNT(*) cnt FROM `users`')->fetchAll();
+    return $result[0]['cnt'];
+  }
+
+  public static function create($name, $password_hashed, $email) {
     $pdo = ctx_getpdo();
     $stmt = $pdo->prepare('INSERT INTO users (name, password_hashed, email) VALUES (?,?,?)');
     $stmt->execute(array($name, $password_hashed, strtolower(trim($email))));
@@ -11,13 +17,14 @@ class UserRepository {
     $userid = intval($pdo->lastInsertId());
     return $userid;
   }
-  function updateName($user_id, $name) {
+
+  public static function updateName($user_id, $name) {
     $pdo = ctx_getpdo();
     $stmt = $pdo->prepare('UPDATE users SET name = trim(?) WHERE id = ?');
     $stmt->execute(array($name, $user_id));
   }
 
-  function updatePassword($user_id, $hashedPassword) {
+  public static function updatePassword($user_id, $hashedPassword) {
     $pdo = ctx_getpdo();
     $stmt = $pdo->prepare('UPDATE users SET password_hashed = ? WHERE id = ?');
     $stmt->execute(array($hashedPassword, $user_id));    
@@ -26,11 +33,10 @@ class UserRepository {
   /**
    * Returns the user with the given ID including the hashed password.
    */
-  function get($user_id, $include_password_hash = false) {
+  public static function get($user_id, $include_password_hash = false) {
     $pdo = ctx_getpdo();
 
-    $stmt = $pdo->prepare('SELECT id, name, password_hashed, email, 
-          md5(email) img,
+    $stmt = $pdo->prepare('SELECT id, name, password_hashed, email,
           COALESCE((select max(last_touch) from sessions us where us.user_id = id) > (UNIX_TIMESTAMP() - 300), false) online
         FROM users 
         WHERE id = ?');
@@ -38,24 +44,16 @@ class UserRepository {
 
     $result = $stmt->fetchAll();
     if (count($result) == 1) {
-      $result[0]['id'] = intval($result[0]['id']);
-      $result[0]['online'] = intval($result[0]['online']);
-
-      if (!$include_password_hash) {
-        unset($result[0]['password_hashed']);
-      }
-
-      return $result[0];
+      return UserRepository::fromResult($result[0], $include_password_hash);
     } else {
       return NULL;
     }
   }
 
-  function getUserByEmail($email, $include_password_hash = false) {
+  public static function getUserByEmail($email, $include_password_hash = false) {
     $pdo = ctx_getpdo();
 
-    $stmt = $pdo->prepare('SELECT id, name, password_hashed, email, 
-          md5(email) img,
+    $stmt = $pdo->prepare('SELECT id, name, password_hashed, email,
           COALESCE((select max(last_touch) from sessions us where us.user_id = id) > (UNIX_TIMESTAMP() - 300), false) online
          FROM users 
         WHERE email = ?');
@@ -63,20 +61,13 @@ class UserRepository {
 
     $result = $stmt->fetchAll();
     if (count($result) == 1) {
-      $result[0]['id'] = intval($result[0]['id']);
-      $result[0]['online'] = intval($result[0]['online']);
-
-      if (!$include_password_hash) {
-        unset($result[0]['password_hashed']);
-      }
-
-      return $result[0];
+      return UserRepository::fromResult($result[0], $include_password_hash);
     } else {
       return NULL;
     }
   }
 
-  function delete($user_id) {
+  public static function delete($user_id) {
     $pdo = ctx_getpdo();
 
     $pdo->prepare('DELETE FROM users WHERE id = ?')->execute(array($user_id));
@@ -90,5 +81,17 @@ class UserRepository {
     $pdo->prepare('DELETE FROM post_users_read WHERE user_id = ?')->execute(array($user_id));
 
     return true;
+  }
+
+  private static function fromResult($result, $include_password_hash = false) {
+    $result['id'] = intval($result['id']);
+    $result['online'] = intval($result['online']);
+    $result['img'] = md5($result['email']);
+    $result['avatar_url'] = 'http://gravatar.com/avatar/' . md5($result['email']);
+
+    if (!$include_password_hash) {
+      unset($result['password_hashed']);
+    }
+    return $result;
   }
 }

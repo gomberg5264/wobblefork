@@ -11,8 +11,12 @@ class SessionService {
     foreach($result as $session) {
       static::signoff($session['session_id']);
     }
+    Stats::gauge('sessions_last_gc_seconds', time());
     return count($result);
   }
+
+
+
   /**
    *
    */
@@ -70,4 +74,12 @@ class SessionService {
     $r = $pdo->query('SELECT count(*) online_sessions FROM sessions WHERE last_touch > (unix_timestamp() - 5 * 60)')->fetchAll();
     return $r[0]['online_sessions'];
   }
+
+  public static function getTotalSessionCount() {
+    $pdo = ctx_getpdo();
+    $r = $pdo->query('SELECT count(*) total_sessions FROM sessions')->fetchAll();
+    return $r[0]['total_sessions'];
+  }
+
+
 }

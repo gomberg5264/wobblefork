@@ -19,8 +19,16 @@ function ListContactsChooserDisplay(relativeTo) {
   this.contacts = [];
   this.selectedContact = null;
 }
+
+
 ListContactsChooserDisplay.prototype = new ContactsChooserDisplay();
 ListContactsChooserDisplay.prototype.constructor = ListContactsChooserDisplay;
+
+ListContactsChooserDisplay.prototype.KEY_UP = 38;
+ListContactsChooserDisplay.prototype.KEY_DOWN = 40;
+ListContactsChooserDisplay.prototype.KEY_ENTER = 13;
+ListContactsChooserDisplay.prototype.KEY_ESCAPE = 27;
+
 ListContactsChooserDisplay.prototype.show = function(title) {
   this.title = title;
   this.render([]); // Render an empty list
@@ -35,7 +43,7 @@ ListContactsChooserDisplay.prototype.render = function(contacts) {
           '<div id="contactschooser_filter"><input type=text id="contactschooser_filter_text"></div>' +
           '<ul id="contactschooser_list">' +
           '</ul>';
-  this.e.empty().append(Mustache.to_html(template, {
+  this.e.empty().append(Mustache.render(template, {
     'title': this.title
   }));
   $contactList = $('#contactschooser_list', this.e);
@@ -43,21 +51,30 @@ ListContactsChooserDisplay.prototype.render = function(contacts) {
     $contactList.append('<li>No contacts</li>');
   } else {
     _.each(this.contacts, function(contact, i) {
-      var template = "<li class=contact title='{{email}}'>" +
-              "<div class='usericon usericon{{size}}'>" +
-              "<div><img src='http://gravatar.com/avatar/{{{img}}}?s={{size}}' width={{size}} height={{size}}></div>" +
-              "<div class='status {{online}}'></div>" +
-              "</div>" +
-              "<span class=name>{{name}}</span>" +
-              "</li>";
-      var $li = $(Mustache.to_html(template, {
-          size: 20,
+      var template =
+        "<li class='contact' title='{{email}}' id='contactchooser-contact-{{contact_id}}'>" +
+        " {{> user_avatar }}" +
+        " <span class=\"name\">{{name}}</span>" +
+        "</li>";
+
+      var view = {
+          contact_id: contact.id,
           email: contact.email,
           name: contact.name,
-          img: contact.img,
-          online: contact.online == 1 ? 'online' : 'offline'
-      })).attr('id', 'contactchooser-contact-' + contact.id).appendTo($contactList);
-      $li.data('contact', contact);
+
+          // Avatar Partial
+          avatar_size: 20,
+          avatar_title: contact.name,
+          avatar_url: contact.avatar_url || "http://gravatar.com/avatar/" + contact.img + "?=20",
+          avatar_online: contact.online == 1 ? 'online' : 'offline'
+      };
+      var partials = {
+        'user_avatar': MustacheAvatarPartial.template
+      };
+
+      var $li = $(Mustache.render(template, view, partials))
+      $li.appendTo($contactList)
+        .data('contact', contact);
 
       $li.click($.proxy(function() {
         // Move cursor to clicked and then one down
@@ -84,21 +101,21 @@ ListContactsChooserDisplay.prototype.render = function(contacts) {
 
   $filterText = $("#contactschooser_filter_text");
   $filterText.keydown($.proxy(function(e) {
-    if (e.which == 27) {
+    if (e.which == ListContactsChooserDisplay.prototype.KEY_ESCAPE) {
       // Close dialog on escape
       this.close();
     }
-    else if (e.which == 38) {
+    else if (e.which == ListContactsChooserDisplay.prototype.KEY_UP) {
       // Naviagte up
       this.navigatePreviousContact();
       e.preventDefault();
     }
-    else if (e.which == 40) {
+    else if (e.which == ListContactsChooserDisplay.prototype.KEY_DOWN) {
       // Navigate down
       this.navigateNextContact();
       e.preventDefault();
     }
-    else if (e.which == 13) {
+    else if (e.which == ListContactsChooserDisplay.prototype.KEY_ENTER) {
       e.preventDefault();
       $('#contactchooser-contact-' + this.selectedContact.id).click(); // Simulate clicking on it
     }
@@ -144,6 +161,13 @@ ListContactsChooserDisplay.prototype.navigateNextContact = function() {
 
   if (element && element.length > 0) {
     this.setSelectedContact(element.data('contact'));
+
+    // Ensure that the element is visible
+    var $list = $("#contactschooser_list", this.e);
+
+    for (var i = 0; i < 100 && element.position().top > $list.height(); i++) {
+      $list.scrollTop($list.scrollTop() + element.height());
+    }
   }
 };
 ListContactsChooserDisplay.prototype.navigatePreviousContact = function() {
@@ -156,6 +180,13 @@ ListContactsChooserDisplay.prototype.navigatePreviousContact = function() {
 
   if (element && element.length > 0) {
     this.setSelectedContact(element.data('contact'));
+
+    // Ensure that the element is visible
+    var $list = $("#contactschooser_list", this.e);
+
+    for (var i = 0; i < 100 && element.position().top < 0; i++) {
+      $list.scrollTop($list.scrollTop() - element.height());
+    }
   }
 };
 ListContactsChooserDisplay.prototype.refreshFilteredContactList = function(filterText) {

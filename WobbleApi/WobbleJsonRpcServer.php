@@ -1,12 +1,27 @@
 <?php
 
 class WobbleJsonRpcServer extends HttpJsonRpcServer {
+  private $httpRequestDurationHistogram;
   public function __construct() {
     parent::__construct();
 
+    $this->httpRequestDurationHistogram = Stats::histogramWithLabels(
+      'http_request_duration_milliseconds',
+      [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 500, 1000, 2500, 5000, 100000]
+    );
+
     $this->addFunctions(array (
       // Core
-      array('file' => 'api_core.php', 'method' => 'wobble_api_version', 'name'=>'wobble.api_version'),
+      array('file' => 'api_core.php', 'method' => 'wobble_api_version', 'name' => 'wobble.api_version'),
+
+      // User / Session
+      array('file' => 'api_user.php', 'method' => 'user_register'),
+      array('file' => 'api_user.php', 'method' => 'user_get'),
+      array('file' => 'api_user.php', 'method' => 'user_get_id'),
+      array('file' => 'api_user.php', 'method' => 'user_change_name'),
+      array('file' => 'api_user.php', 'method' => 'user_change_password'),
+      array('file' => 'api_user.php', 'method' => 'user_login'),
+      array('file' => 'api_user.php', 'method' => 'user_signout'),
 
       // Topics
       array('file' => 'api_topiclist.php', 'method' => 'topics_list'),
@@ -26,24 +41,22 @@ class WobbleJsonRpcServer extends HttpJsonRpcServer {
       array('file' => 'api_topic.php', 'method' => 'post_delete'),
       array('file' => 'api_topic.php', 'method' => 'post_change_read'),
       array('file' => 'api_topic.php', 'method' => 'post_change_lock'),
-      array('file' => 'api_topic.php', 'method' => 'post_change_read', 'name' => 'post_read'),
 
-      // User / Session
-      array('file' => 'api_user.php', 'method' => 'user_get'),
-      array('file' => 'api_user.php', 'method' => 'user_get_id'),
-      array('file' => 'api_user.php', 'method' => 'user_register'),
-      array('file' => 'api_user.php', 'method' => 'user_change_name'),
-      array('file' => 'api_user.php', 'method' => 'user_change_password'),
-      array('file' => 'api_user.php', 'method' => 'user_login'),
-      array('file' => 'api_user.php', 'method' => 'user_signout'),
-
+      
       // Notifications
       array('file' => 'api_notifications.php', 'method' => 'get_notifications'),
 
-      // Contact list
-      array('file' => 'api_user.php', 'method' => 'user_get_contacts'),
-      array('file' => 'api_user.php', 'method' => 'user_add_contact'),
-      array('file' => 'api_user.php', 'method' => 'user_remove_contact')
+      // Contact list (api_contacts.php)
+      array('file' => 'api_contacts.php', 'method' => 'user_get_contacts', 'name' => 'contacts.list'),
+      array('file' => 'api_contacts.php', 'method' => 'user_add_contact', 'name' => 'contacts.add'),  
+      array('file' => 'api_contacts.php', 'method' => 'user_remove_contact', 'name' => 'contacts.remove'),
+
+
+      // DEPRECATED
+      array('file' => 'api_contacts.php', 'method' => 'user_get_contacts'),  // deprecated
+      array('file' => 'api_contacts.php', 'method' => 'user_add_contact'),   // deprecated
+      array('file' => 'api_contacts.php', 'method' => 'user_remove_contact'), // deprecated
+      array('file' => 'api_topic.php', 'method' => 'post_change_read', 'name' => 'post_read')
     ));
   }
 
@@ -51,17 +64,11 @@ class WobbleJsonRpcServer extends HttpJsonRpcServer {
    *
    */
   public function handleHttpRequest() {
-    $startRequest = microtime(true);
+    $startTime = microtime(true);
     parent::handleHttpRequest();
-    $endRequest = microtime(true);
+    $endTime = microtime(true);
 
-    # Global
-    Stats::incr('requests.counter');
-    Stats::incr('requests.time', floor($endRequest - $startRequest));
-
-    # By Day
-    Stats::incr('requests.counter;d=' . date(13059801));
-    Stats::incr('requests.time;d=' . date('Y-m-d'));
+    $this->httpRequestDurationHistogram->observe(($endTime - $startTime) / 1000);
   }
 
   /**
@@ -127,25 +134,12 @@ class WobbleJsonRpcServer extends HttpJsonRpcServer {
   }
 
   protected function beforeCallStats($method, $params) {
-    Stats::incr('jsonrpc.api.' . $method . '.invokes');
-
-    $key = 'jsonrpc.api.detailed:';
-    $key .= $method;
-    if (isset($params['topic_id'])) $key .= ';t=' . $params['topic_id'];
-    if (isset($params['post_id'])) $key .= ';p=' . $params['post_id'];
-    $user_id = ctx_getuserid();
-    if (!is_null($user_id)) $key .= ';u=' . $user_id;
-    Stats::incr($key);
+    Stats::incr('jsonrpc_api_calls{handler="' . $method . '"}');
   }
 
   public function afterCall($method, $params, $result, $error) {
     if (!is_null($error)) {
-      Stats::incr('jsonrpc.errors');
-      Stats::incr('jsonrpc.api.' . $method . '.errors');
-    }
-    if (!is_null($result)) {
-      Stats::incr('jsonrpc.success');
-      Stats::incr('jsonrpc.api.' . $method . '.success');
+      Stats::incr('jsonrpc_api_errors{handler="' . $method . '"}');
     }
   }
 }

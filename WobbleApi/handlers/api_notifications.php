@@ -1,6 +1,7 @@
 <?php
 /**
- * Returns the notifications for the current user. If no notifications are available, this wait up to 10secs.
+ * Returns the notifications for the current user. If no retries are available, it performs a busy
+ * polling with a max try count of 20.
  * A notification is normally an object with a field 'type' which describes the notification further.
  * 
  * input = {'next_timestamp': int()}
@@ -25,7 +26,7 @@ function get_notifications($params) {
   }
 
   // Check 10 times, but sleep after each check, if no notifications where found
-  for ($i = 0; $i < 100; $i++) {
+  for ($i = 0; $i < 20 && !connection_aborted(); $i++) {
     $timestamp = time();
     $messages = NotificationRepository::getNotifications($session_id, $timestamp);
     if (count($messages) > 0) {
@@ -36,6 +37,14 @@ function get_notifications($params) {
     }
     usleep(250 * 1000); /* 250ms */
   }
+
+  if (connection_aborted()) {
+    Stats::incr('notification_connection_aborted');
+  } else {
+    # oot (out of time): reached the natural intended limit for this request
+    Stats::incr('notification_oot');
+  }
+
   return array(
     'next_timestamp' => time(),
     'messages' => array()

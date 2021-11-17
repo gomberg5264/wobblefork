@@ -8,12 +8,19 @@ require_once dirname(__FILE__) . '/handlers/jsonrpc_system.php'; # Exports the d
  */
 class JsonRpcServer {
   private $functions = array();
+  private $functionTimeHistogram;
 
   public function __construct() {
     $this->addFunctions(array(
       array('file' => 'jsonrpc_system.php', 'name' => 'system.listMethods', 'method' => 'jsonrpc_exported_system_list'),
       array('file' => 'jsonrpc_system.php', 'name' => 'echo', 'method' => 'jsonrpc_echo')
     ));
+
+    $this->functionTimeHistogram = Stats::histogramWithLabels(
+      'jsonrpc_api_call_duration_milliseconds',
+      [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 500, 1000, 2500, 5000, 100000],
+      ['method', "code"]
+    );
   }
 
   /**
@@ -116,15 +123,29 @@ class JsonRpcServer {
       }
 
       $this->beforeCall($request['method'], $request['params']);
+      $startTime = microtime(true);
+      $exception = null;
       $response = call_user_func($export['method'], $request['params'], $this);
-      $this->afterCall($request['method'], $request['params'], $response, null);
     } catch(Exception $e) {
-      $this->afterCall($request['method'], $request['params'], null, $e);
-      return $this->createError(-32603, $e->getMessage(), $request['id']);
+      $exception = $e;
+      $response = null;
     }
 
+    $endTime = microtime(true);
+
+    $this->afterCall($request['method'], $request['params'], $response, $exception);
+
+    $this->functionTimeHistogram->observe(
+      ($endTime - $startTime) / 1000,
+      [$request['method'], $response != null ? "200" : "500"]
+    );
+
     if (isset($request['id'])) {
-      return $this->createResult($request['id'], $response);
+      if ($exception != null) {
+        return $this->createError(-32603, $exception->getMessage(), $request['id']);
+      } else {
+        return $this->createResult($request['id'], $response);
+      }
     } else {
       return NULL; # only return a result for requests with an id (no id => notification)
     }

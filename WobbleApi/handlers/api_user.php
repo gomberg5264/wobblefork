@@ -1,4 +1,15 @@
 <?php
+
+require dirname(__FILE__) . '/api_contacts.php';
+
+###
+#
+# NOTE: This file assumes, we have the password_* functions from php5.5 available. If not, install [1] and load it in the config.
+# [1] https://github.com/ircmaxell/password_compat
+#
+###
+
+
 /**
  * Input = {}
  * Result = true 
@@ -32,13 +43,31 @@ function user_login($params) {
   ValidationService::validate_email($email);
   ValidationService::validate_not_empty($password);
 
-  $email = InputSanitizer::sanitizeEmail($email);
+  $email = InputSanitizer::sanitizeEmail($email); # TODO: Should be done by the client
 
-  $password_hashed = SecurityService::hashPassword($password);
   $user = UserRepository::getUserByEmail($email, true);
-  if ($user != NULL && $password_hashed === $user['password_hashed']) {
-    # Valid login given. We must start a session now (we dont want the cookie)
 
+  # NOTE: we need to support the old-style passwords for some time
+  $old_password_hash = md5(PASSWORD_SALT . $password);
+  $rehash = false;
+  $success = false;
+
+  if ($old_password_hash == $user['password_hashed']) {
+    $rehash = true;
+    $success = true;
+  }
+  else if (password_verify($password, $user['password_hashed'])) {
+    $rehash = password_needs_rehash($user['password_hashed'], PASSWORD_DEFAULT);
+    $success = true;
+  }
+
+  if ($user != NULL && $success) {
+    if ($rehash) {
+      $password_hashed = password_hash($password, PASSWORD_DEFAULT);
+      UserRepository::updatePassword($user['id'], $password_hashed);
+    }
+
+    # Valid login given. We must start a session now (we dont want the cookie)
     session_start();
 
     $_SESSION['userid'] = $user['id'];
@@ -67,8 +96,7 @@ function user_login($params) {
 function user_register($params) {
   $email = $params['email'];
   $password = $params['password'];
-  $password_hashed = SecurityService::hashPassword($password);
-
+  
   ValidationService::validate_email($email);
   ValidationService::validate_not_empty($password);
 
@@ -77,6 +105,7 @@ function user_register($params) {
     throw new Exception('You are already registered!');
   }
 
+  $password_hashed = password_hash($password, PASSWORD_DEFAULT);
   $user_id = UserRepository::create($email, $password_hashed, $email);
 
 
@@ -134,8 +163,8 @@ function user_change_password($params) {
     ValidationService::validate_not_empty($self_user_id);
     ValidationService::validate_not_empty($password);
 
-    $hashed = SecurityService::hashPassword($password);
-    UserRepository::updatePassword($self_user_id, $hashed);
+    $password_hashed = password_hash($password, PASSWORD_DEFAULT);
+    UserRepository::updatePassword($self_user_id, $password_hashed);
     return TRUE;
 }
 
@@ -162,76 +191,4 @@ function user_get() {
  */
 function user_get_id() {
   return ctx_getuserid();
-}
-
-/**
- * Returns all contacts for the currently logged in user.
- *
- * Input = {}
- * Result = [Contact]
- * Contact = {...?...} id, name, email, img, online
- */
-function user_get_contacts() {
-  $self_user_id = ctx_getuserid();
-
-  ValidationService::validate_not_empty($self_user_id);
-
-  $contacts = ContactsRepository::getContacts($self_user_id);
-  usort($contacts, function($a, $b) {
-    if ($a['online'] == $b['online']) {
-      return strcasecmp($a['name'], $b['name']);
-    }
-    else {
-      if ($a['online'] == 1) {
-        return -1;
-      }
-      else {
-        return 1;
-      }
-    }
-  });
-  return $contacts;
-}
-
-/**
- * Input = {'contact_email': Email}
- * Email = string()
- *
- * Result = true|false
- */
-function user_add_contact($params) {
-  $self_user_id = ctx_getuserid();
-  $contact_email = $params['contact_email'];
-
-  ValidationService::validate_not_empty($self_user_id);
-  ValidationService::validate_email($contact_email);
-
-  $user = UserRepository::getUserByEmail($contact_email);
-
-  if ($user !== NULL) {
-    if ($user['id'] == $self_user_id) {
-      return FALSE;
-    }
-    ContactsRepository::addUser($self_user_id, $user['id']);
-    return TRUE;
-  }
-  return FALSE;
-}
-
-/**
- * Removes the user with the given ID from the currently logged in user.
- *
- * Input = {'contact_id': UserId}
- * Result = true
- */
-function user_remove_contact($params) {
-  $self_user_id = ctx_getuserid();
-  $contact_id = $params['contact_id'];
-
-  ValidationService::validate_not_empty($self_user_id);
-  ValidationService::validate_not_empty($contact_id);
-
-  ContactsRepository::removeUser($self_user_id, $contact_id);
-
-  return TRUE;
 }
